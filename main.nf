@@ -195,8 +195,177 @@ process get_software_versions {
     """
 }
 
+
+//BUILDING REFERENCE INDICES AS IN SAREK
 /*
- * STEP 1 - FastQC
+================================================================================
+                                BUILDING INDEXES
+================================================================================
+*/
+
+// And then initialize channels based on params or indexes that were just built
+
+process BuildBWAindexes {
+    tag {fasta}
+
+    publishDir params.outdir, mode: params.publishDirMode,
+        saveAs: {params.saveGenomeIndex ? "reference_genome/BWAIndex/${it}" : null }
+
+    input:
+        file(fasta) from ch_fasta
+
+    output:
+        file("${fasta}.*") into bwaIndexes
+
+    when: !(params.bwaIndex) && params.fasta && 'mapping' in step
+
+    script:
+    """
+    bwa index ${fasta}
+    """
+}
+
+ch_bwaIndex = params.bwaIndex ? Channel.value(file(params.bwaIndex)) : bwaIndexes
+
+process BuildDict {
+    tag {fasta}
+
+    publishDir params.outdir, mode: params.publishDirMode,
+        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+
+    input:
+        file(fasta) from ch_fasta
+
+    output:
+        file("${fasta.baseName}.dict") into dictBuilt
+
+    when: !(params.dict) && params.fasta && !('annotate' in step)
+
+    script:
+    """
+    gatk --java-options "-Xmx${task.memory.toGiga()}g" \
+        CreateSequenceDictionary \
+        --REFERENCE ${fasta} \
+        --OUTPUT ${fasta.baseName}.dict
+    """
+}
+
+ch_dict = params.dict ? Channel.value(file(params.dict)) : dictBuilt
+
+process BuildFastaFai {
+    tag {fasta}
+
+    publishDir params.outdir, mode: params.publishDirMode,
+        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+
+    input:
+        file(fasta) from ch_fasta
+
+    output:
+        file("${fasta}.fai") into fastaFaiBuilt
+
+    when: !(params.fastaFai) && params.fasta && !('annotate' in step)
+
+    script:
+    """
+    samtools faidx ${fasta}
+    """
+}
+
+ch_fastaFai = params.fastaFai ? Channel.value(file(params.fastaFai)) : fastaFaiBuilt
+
+process BuildDbsnpIndex {
+    tag {dbsnp}
+
+    publishDir params.outdir, mode: params.publishDirMode,
+        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+
+    input:
+        file(dbsnp) from ch_dbsnp
+
+    output:
+        file("${dbsnp}.tbi") into dbsnpIndexBuilt
+
+    when: !(params.dbsnpIndex) && params.dbsnp && ('mapping' in step || 'controlfreec' in tools || 'haplotypecaller' in tools || 'mutect2' in tools)
+
+    script:
+    """
+    tabix -p vcf ${dbsnp}
+    """
+}
+
+ch_dbsnpIndex = params.dbsnp ? params.dbsnpIndex ? Channel.value(file(params.dbsnpIndex)) : dbsnpIndexBuilt : "null"
+
+process BuildGermlineResourceIndex {
+    tag {germlineResource}
+
+    publishDir params.outdir, mode: params.publishDirMode,
+        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+
+    input:
+        file(germlineResource) from ch_germlineResource
+
+    output:
+        file("${germlineResource}.tbi") into germlineResourceIndexBuilt
+
+    when: !(params.germlineResourceIndex) && params.germlineResource && 'mutect2' in tools
+
+    script:
+    """
+    tabix -p vcf ${germlineResource}
+    """
+}
+
+ch_germlineResourceIndex = params.germlineResource ? params.germlineResourceIndex ? Channel.value(file(params.germlineResourceIndex)) : germlineResourceIndexBuilt : "null"
+
+process BuildKnownIndelsIndex {
+    tag {knownIndels}
+
+    publishDir params.outdir, mode: params.publishDirMode,
+        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+
+    input:
+        each file(knownIndels) from ch_knownIndels
+
+    output:
+        file("${knownIndels}.tbi") into knownIndelsIndexBuilt
+
+    when: !(params.knownIndelsIndex) && params.knownIndels && 'mapping' in step
+
+    script:
+    """
+    tabix -p vcf ${knownIndels}
+    """
+}
+
+ch_knownIndelsIndex = params.knownIndels ? params.knownIndelsIndex ? Channel.value(file(params.knownIndelsIndex)) : knownIndelsIndexBuilt.collect() : "null"
+
+process BuildPonIndex {
+    tag {pon}
+
+    publishDir params.outdir, mode: params.publishDirMode,
+        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+
+    input:
+        file(pon) from ch_pon
+
+    output:
+        file("${pon}.tbi") into ponIndexBuilt
+
+    when: !(params.pon_index) && params.pon && ('tnscope' in tools || 'mutect2' in tools)
+
+    script:
+    """
+    tabix -p vcf ${pon}
+    """
+}
+
+ch_ponIndex = params.pon_index ? Channel.value(file(params.pon_index)) : ponIndexBuilt
+
+
+
+/*
+ * QC STEP 1
  */
 process fastqc {
     tag "$name"
@@ -219,7 +388,7 @@ process fastqc {
 }
 
 /*
- * STEP 2 - MultiQC
+ * QC STEP 2
  */
 process multiqc {
     publishDir "${params.outdir}/MultiQC", mode: 'copy'
@@ -264,6 +433,36 @@ process output_documentation {
     markdown_to_html.py $output_docs -o results_description.html
     """
 }
+
+/*
+ * NIBSC-GATK-IMPLEMENTATION-START
+ */
+process doalignment {
+    tag "$name"
+    label 'process_medium'
+    publishDir "${params.outdir}/alignments", mode: 'copy',
+        saveAs: { filename ->
+                      filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"
+                }
+
+    input:
+    set val(sampleprefix), file(reads) from ch_read_files_trimming
+    file(fasta) from ch_fasta
+    file(fastaFai) from ch_fastaFai
+
+    output:
+    set ( sampleprefix, file("${sampleprefix}.unsorted.sam") ) into samfile
+
+    script:
+    """
+    bwa mem -t ${task.cpus} -M -R '@RG\\tID:${sampleprefix}\\tSM:${sampleprefix}\\tPL:Illumina' $fasta $reads > ${sampleprefix}.unsorted.sam
+    """
+}
+
+
+
+
+
 
 /*
  * Completion e-mail notification
