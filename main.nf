@@ -509,8 +509,10 @@ process baserecalibrationtable {
   """
 }
 
+//creating a (prefix, recaltable, bamfile) tuple for input to the following process
 forrecal = recaltable.join(markedbamforapply)
 
+//NIBSC 5 - apply previously calculated base quality score recalibration
 process applybaserecalibration {
   publishDir "$params.outdir/alignments", mode: "copy"
     tag "$name"
@@ -527,6 +529,7 @@ process applybaserecalibration {
   """
 }
 
+//NIBSC 6 - create a BAI indexed file from this alignment
 process indexrecalibrated {
   publishDir "$params.outdir/alignments", mode: "copy"
     tag "$name"
@@ -543,62 +546,77 @@ process indexrecalibrated {
   """
 }
 
+//Make two channels with the BAM and BAI alignments for following variant calling
 forcaller = recalibratedforcaller.join(indexedbam)
 forcaller.into {
   forcaller1
   forcaller2
 }
 
+//NIBSC 7 - call germline variants
 process haplotypecall {
     tag "$name"
     label 'process_medium'
 
   input:
   set ( sampleprefix, file(bamfile), file(baifile) ) from forcaller1
-  file refs from ref3.first()
+  file(dbsnp) from ch_dbsnp
+  file(dbsnpIndex) from ch_dbsnpIndex
+  file(fasta) from ch_fasta
+  file(fastaFai) from ch_fastaFai
 
   output:
   set ( sampleprefix, file("${sampleprefix}.hapcalled.vcf") ) into calledhaps
 
   """
-  gatk HaplotypeCaller -R ${refs}/${params.genomefasta} -O ${sampleprefix}.hapcalled.vcf -I $bamfile --native-pair-hmm-threads ${params.cpus} --dbsnp ${refs}/${params.dbsnp}
+  gatk HaplotypeCaller -R $fasta -O ${sampleprefix}.hapcalled.vcf -I $bamfile --native-pair-hmm-threads ${task.cpus} --dbsnp $dbsnp
   """
 }
 
+//NIBSC 8 - call somatic variants without using a paired normal tissue - refer to the panel of normals and gnomad germline resource
 process mutectcall {
     tag "$name"
     label 'process_medium'
 
   input:
   set ( sampleprefix, file(bamfile), file(baifile) ) from forcaller2
-  file refs from ref4.first()
+  file(fasta) from ch_fasta
+  file(fastaFai) from ch_fastaFai
+  file(gnomad) from ch_germlineResource
+  file(gnomadindex) from ch_germlineResourceIndex
+  file(normpanel) from ch_normPanel
+  file(normpanelindex) from ch_normPanelIndex
 
   output:
   set ( sampleprefix, file("${sampleprefix}.mutcalled.vcf"), file("${sampleprefix}.mutcalled.vcf.stats") ) into calledmuts
 
   """
-  gatk Mutect2 -R ${refs}/${params.genomefasta} -O ${sampleprefix}.mutcalled.vcf -I $bamfile --native-pair-hmm-threads ${params.cpus} --panel-of-normals ${refs}/${params.normpanel} --germline-resource ${refs}/${params.gnomad}
+  gatk Mutect2 -R $fasta -O ${sampleprefix}.mutcalled.vcf -I $bamfile --native-pair-hmm-threads ${task.cpus} --panel-of-normals $normpanel --germline-resource $gnomad
   """
 }
 
+//NIBSC 9 - run a default filter on the mutect calls
 process mutectfilter {
     tag "$name"
     label 'process_medium'
 
   input:
   set ( sampleprefix, file(mutvcf), file(mutstats) ) from calledmuts
-  file refs from ref7.first()
+  file(fasta) from ch_fasta
+  file(fastafai) from ch_fastaFai
 
   output:
   set ( sampleprefix, file("${sampleprefix}.mutcalled.filtered.vcf") ) into filteredmuts
 
   """
-  gatk FilterMutectCalls -R ${refs}/${params.genomefasta} -V $mutvcf -O ${sampleprefix}.mutcalled.filtered.vcf
+  gatk FilterMutectCalls -R $fasta -V $mutvcf -O ${sampleprefix}.mutcalled.filtered.vcf
   """
 }
 
+//Join the variant calls to process filtering together
 rawvars = calledhaps.join(filteredmuts)
 
+//NIBSC 10 - separate the different kinds of variant calls to treat with different filters
 process snpindelsplit {
     tag "$name"
     label 'process_medium'
@@ -617,25 +635,28 @@ process snpindelsplit {
   """
 }
 
+//NIBSC 11 - Using hard filter rules as given as recommendations on GATK4 help pages
 process hardfilter {
     tag "$name"
     label 'process_medium'
 
   input:
   set ( sampleprefix, file(hapsnp), file(hapindel), file(mutsnp), file(mutindel) ) from splitupvars
-  file refs from ref5.first()
+  file(fasta) from ch_fasta
+  file(fastafai) from ch_fastaFai
 
   output:
   set ( sampleprefix, file("${sampleprefix}.germline.filtered.snp.vcf"), file("${sampleprefix}.germline.filtered.indel.vcf"), file("${sampleprefix}.somatic.filtered.snp.vcf"), file("${sampleprefix}.somatic.filtered.indel.vcf") ) into filteredvars
 
   """
-  gatk VariantFiltration -O ${sampleprefix}.germline.filtered.snp.vcf -V $hapsnp -R ${refs}/${params.genomefasta} --filter-name snpfilter --filter-expression "QD < 2.0 || MQ < 40.0 || FS > 60.0 || SOR > 3.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"
-  gatk VariantFiltration -O ${sampleprefix}.germline.filtered.indel.vcf -V $hapindel -R ${refs}/${params.genomefasta} --filter-name indelfilter --filter-expression "QD < 2.0 || FS > 200.0 || SOR > 10.0 || ReadPosRankSum < -20.0"
-  gatk VariantFiltration -O ${sampleprefix}.somatic.filtered.snp.vcf -V $mutsnp -R ${refs}/${params.genomefasta} --filter-name snpfilter --filter-expression "QD < 2.0 || MQ < 40.0 || FS > 60.0 || SOR > 3.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"
-  gatk VariantFiltration -O ${sampleprefix}.somatic.filtered.indel.vcf -V $mutindel -R ${refs}/${params.genomefasta} --filter-name indelfilter --filter-expression "QD < 2.0 || FS > 200.0 || SOR > 10.0 || ReadPosRankSum < -20.0"
+  gatk VariantFiltration -O ${sampleprefix}.germline.filtered.snp.vcf -V $hapsnp -R $fasta --filter-name snpfilter --filter-expression "QD < 2.0 || MQ < 40.0 || FS > 60.0 || SOR > 3.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"
+  gatk VariantFiltration -O ${sampleprefix}.germline.filtered.indel.vcf -V $hapindel -R $fasta --filter-name indelfilter --filter-expression "QD < 2.0 || FS > 200.0 || SOR > 10.0 || ReadPosRankSum < -20.0"
+  gatk VariantFiltration -O ${sampleprefix}.somatic.filtered.snp.vcf -V $mutsnp -R $fasta --filter-name snpfilter --filter-expression "QD < 2.0 || MQ < 40.0 || FS > 60.0 || SOR > 3.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"
+  gatk VariantFiltration -O ${sampleprefix}.somatic.filtered.indel.vcf -V $mutindel -R $fasta --filter-name indelfilter --filter-expression "QD < 2.0 || FS > 200.0 || SOR > 10.0 || ReadPosRankSum < -20.0"
   """
 }
 
+//NIBSC 12 - merging the snps and indels again
 process remergevars {
     tag "$name"
     label 'process_medium'
@@ -652,6 +673,7 @@ process remergevars {
   """
 }
 
+//NIBSC 13 - evaluating the variant calls for ti-tv ratio and so-on
 process variantevaluation {
   publishDir "$params.outdir/analysis", mode: "copy"
     tag "$name"
@@ -659,17 +681,21 @@ process variantevaluation {
 
   input:
   set ( sampleprefix, file(germline), file(germlineindex), file(somatic), file(somaticindex) ) from germsomvars1
-  file refs from ref6.first()
+  file(dbsnp) from ch_dbsnp
+  file(dbsnpIndex) from ch_dbsnpIndex
+  file(fasta) from ch_fasta
+  file(fastaFai) from ch_fastaFai
 
   output:
   set ( sampleprefix, file("${sampleprefix}.germline.eval.grp"), file("${sampleprefix}.somatic.eval.grp") ) into variantevaluations
 
   """
-  gatk VariantEval -eval $germline -O ${sampleprefix}.germline.eval.grp -R ${refs}/${params.genomefasta} -D ${refs}/${params.dbsnp}
-  gatk VariantEval -eval $somatic -O ${sampleprefix}.somatic.eval.grp -R ${refs}/${params.genomefasta} -D ${refs}/${params.dbsnp}
+  gatk VariantEval -eval $germline -O ${sampleprefix}.germline.eval.grp -R $fasta -D $dbsnp
+  gatk VariantEval -eval $somatic -O ${sampleprefix}.somatic.eval.grp -R $fasta -D $dbsnp
   """
 }
 
+//NIBSC 14 - adding annotation to variant calls for effect prediction - uses snpEff installed settings for hg19
 process effectprediction {
   publishDir "$params.outdir/analysis", mode: "copy"
     tag "$name"
