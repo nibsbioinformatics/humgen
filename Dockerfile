@@ -1,5 +1,5 @@
 FROM nfcore/base:1.9
-LABEL authors="Thomas Bleazard, Pedro Raposo, Ravneet Bhuller, Leo Perfect, Francesco Lescai" \
+LABEL authors="Thomas Bleazard and Francesco Lescai" \
       description="Docker image containing all software requirements for the nibscbioinformatics/humgen pipeline"
 
 # Install the conda environment
