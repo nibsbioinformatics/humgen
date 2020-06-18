@@ -183,19 +183,15 @@ process get_software_versions {
 ================================================================================
 */
 
+//Make BWA index of reference fasta to allow alignment
 process BuildBWAindexes {
-    tag {fasta}
-
-    publishDir params.outdir, mode: params.publishDirMode,
-        saveAs: {params.saveGenomeIndex ? "reference_genome/BWAIndex/${it}" : null }
+    label 'process_medium'
 
     input:
-        file(fasta) from ch_fasta
+    file(fasta) from ch_genomefasta
 
     output:
-        file("${fasta}.*") into bwaIndexes
-
-    when: !(params.bwaIndex) && params.fasta && 'mapping' in step
+    file("${fasta}.*") into ch_bwaIndex
 
     script:
     """
@@ -203,21 +199,15 @@ process BuildBWAindexes {
     """
 }
 
-ch_bwaIndex = params.bwaIndex ? Channel.value(file(params.bwaIndex)) : bwaIndexes
-
+//Create sequence dictionary from reference fasta
 process BuildDict {
-    tag {fasta}
-
-    publishDir params.outdir, mode: params.publishDirMode,
-        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+    label 'process_medium'
 
     input:
-        file(fasta) from ch_fasta
+    file(fasta) from ch_genomefasta
 
     output:
-        file("${fasta.baseName}.dict") into dictBuilt
-
-    when: !(params.dict) && params.fasta && !('annotate' in step)
+    file("${fasta.baseName}.dict") into dictBuilt
 
     script:
     """
@@ -228,21 +218,15 @@ process BuildDict {
     """
 }
 
-ch_dict = params.dict ? Channel.value(file(params.dict)) : dictBuilt
-
+//Make SAMTools FAI index of reference fasta
 process BuildFastaFai {
-    tag {fasta}
-
-    publishDir params.outdir, mode: params.publishDirMode,
-        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+    label 'process_medium'
 
     input:
-        file(fasta) from ch_fasta
+    file(fasta) from ch_genomefasta
 
     output:
-        file("${fasta}.fai") into fastaFaiBuilt
-
-    when: !(params.fastaFai) && params.fasta && !('annotate' in step)
+    file("${fasta}.fai") into fastaFaiBuilt
 
     script:
     """
@@ -250,21 +234,15 @@ process BuildFastaFai {
     """
 }
 
-ch_fastaFai = params.fastaFai ? Channel.value(file(params.fastaFai)) : fastaFaiBuilt
-
+//Build tabix index for dbSNP reference
 process BuildDbsnpIndex {
-    tag {dbsnp}
-
-    publishDir params.outdir, mode: params.publishDirMode,
-        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+    label 'process_medium'
 
     input:
-        file(dbsnp) from ch_dbsnp
+    file(dbsnp) from ch_dbsnp
 
     output:
-        file("${dbsnp}.tbi") into dbsnpIndexBuilt
-
-    when: !(params.dbsnpIndex) && params.dbsnp && ('mapping' in step || 'controlfreec' in tools || 'haplotypecaller' in tools || 'mutect2' in tools)
+    file("${dbsnp}.tbi") into dbsnpIndexBuilt
 
     script:
     """
