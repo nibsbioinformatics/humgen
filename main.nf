@@ -9,10 +9,7 @@
 ----------------------------------------------------------------------------------------
 */
 
-// =======================================================================
-
 def helpMessage() {
-
     log.info nfcoreHeader()
     log.info"""
 
@@ -20,7 +17,7 @@ def helpMessage() {
 
     The typical command for running the pipeline is as follows:
 
-    nextflow run nibscbioinformatics/humgen --input /your/reads/folder -profile docker
+    nextflow run nibscbioinformatics/humgen --input /your/reads/folder -profile singularity
 
     Mandatory arguments:
       --input [file]                  A folder containing read pairs R1 and R2 for at least one sample ending with .fastq.gz
@@ -28,7 +25,9 @@ def helpMessage() {
       -profile [str]                  Configuration profile to use. Can use multiple (comma separated)
                                       Available: conda, docker, singularity, test, awsbatch, <institute> and more
 
-      Optional arguments:
+    Optional arguments:
+      --genome [genome ID]            A genome reference given in the config file humanref.config
+                                      Currently defaults to only available option hg19
 
     Other options:
       --outdir [file]                 The output directory where the results will be saved
@@ -43,25 +42,22 @@ def helpMessage() {
       --awscli [str]                  Path to the AWS CLI tool
     """.stripIndent()
 }
-
 // Show help message
 if (params.help) {
     helpMessage()
     exit 0
 }
 
+
 /*
  * SET UP CONFIGURATION VARIABLES
  */
-
-
 // Has the run name been specified by the user?
 //  this has the bonus effect of catching both -name and --name
 custom_runName = params.name
 if (!(workflow.runName ==~ /[a-z]+_[a-z]+/)) {
     custom_runName = workflow.runName
 }
-
 if (workflow.profile.contains('awsbatch')) {
     // AWSBatch sanity checking
     if (!params.awsqueue || !params.awsregion) exit 1, "Specify correct --awsqueue and --awsregion parameters on AWSBatch!"
@@ -71,25 +67,34 @@ if (workflow.profile.contains('awsbatch')) {
     // Prevent trace files to be stored on S3 since S3 does not support rolling files.
     if (params.tracedir.startsWith('s3:')) exit 1, "Specify a local tracedir or run without trace! S3 cannot be used for tracefiles."
 }
-
 // Stage config files
 ch_multiqc_config = file("$baseDir/assets/multiqc_config.yaml", checkIfExists: true)
 ch_multiqc_custom_config = params.multiqc_config ? Channel.fromPath(params.multiqc_config, checkIfExists: true) : Channel.empty()
 ch_output_docs = file("$baseDir/docs/output.md", checkIfExists: true)
 
-// channels are set based on parameters
-// or as local file or URL if none of the name matches (i.e. using switch default)
-// Use an approach like:
-// ch_nucleotide_db = params.nucletide_db ? Channel.value(file(params.nucletide_db)) : "null";
 
 /* ##############################################################
  * Create channels for input reference files and input data files
  * ##############################################################
  */
+ // Use an approach like:
+ // ch_nucleotide_db = params.nucletide_db ? Channel.value(file(params.nucletide_db)) : "null";
 
+params.genome = "hg19" //this is the default and at the moment the only with all the reference files
 
-
-
+if (params.human_reference && params.genome && !params.human_reference.containsKey(params.genome)) {
+   exit 1, "The provided genome '${params.genome}' is not available in the humanref.config file. Currently the available genomes are ${params.genomes.keySet().join(", ")}"
+}
+params.dbsnp = params.human_reference[params.genome].dbsnp
+ch_dbsnp = Channel.value(file(params.dbsnp, checkIfExists: true))
+params.goldindels = params.human_reference[params.genome].goldindels
+ch_goldindels = Channel.value(file(params.goldindels, checkIfExists: true))
+params.normpanel = params.human_reference[params.genome].normpanel
+ch_normpanel = Channel.value(file(params.normpanel, checkIfExists: true))
+params.genomefasta = params.human_reference[params.genome].genomefasta
+ch_genomefasta = Channel.value(file(params.genomefasta, checkIfExists: true))
+params.gnomad = params.human_reference[params.genome].gnomad
+ch_gnomad = Channel.value(file(params.gnomad, checkIfExists: true))
 
 
 // Header log info
@@ -97,8 +102,13 @@ log.info nfcoreHeader()
 def summary = [:]
 if (workflow.revision) summary['Pipeline Release'] = workflow.revision
 summary['Run Name']         = custom_runName ?: workflow.runName
-
 summary['Input']            = params.input
+summary['Genome']           = params.genome
+summary['dbSNP Reference']  = params.dbsnp
+summary['Golden Indels']    = params.goldindels
+summary['Normal Panel']     = params.normpanel
+summary['Fasta Reference']  = params.genomefasta
+summary['Gnomad Reference'] = params.gnomad
 summary['Max Resources']    = "$params.max_memory memory, $params.max_cpus cpus, $params.max_time time per job"
 if (workflow.containerEngine) summary['Container'] = "$workflow.containerEngine - $workflow.container"
 summary['Output dir']       = params.outdir
@@ -107,9 +117,6 @@ summary['Working dir']      = workflow.workDir
 summary['Script dir']       = workflow.projectDir
 summary['User']             = workflow.userName
 summary['Analysis Type']    = params.tool
-summary['Metaphlan DB type'] = params.mpaType
-summary['Nucleotide DB']    = params.nucleotide_db
-summary['Protein DB']       = params.protein_db
 if (workflow.profile.contains('awsbatch')) {
     summary['AWS Region']   = params.awsregion
     summary['AWS Queue']    = params.awsqueue
@@ -129,7 +136,6 @@ log.info "-\033[2m--------------------------------------------------\033[0m-"
 
 // Check the hostnames against configured profiles
 checkHostname()
-
 Channel.from(summary.collect{ [it.key, it.value] })
     .map { k,v -> "<dt>$k</dt><dd><samp>${v ?: '<span style=\"color:#999999;\">N/A</a>'}</samp></dd>" }
     .reduce { a, b -> return [a, b].join("\n            ") }
@@ -145,7 +151,6 @@ Channel.from(summary.collect{ [it.key, it.value] })
         </dl>
     """.stripIndent() }
     .set { ch_workflow_summary }
-
 /*
  * Parse software version numbers
  */
@@ -174,11 +179,9 @@ process get_software_versions {
 
 /*
 ================================================================================
-                                BUILDING INDEXES
+                                START OF NIBSC HUMGEN PIPELINE
 ================================================================================
 */
-
-// And then initialize channels based on params or indexes that were just built
 
 process BuildBWAindexes {
     tag {fasta}
@@ -434,7 +437,7 @@ process doalignment {
 process sorttobam {
     tag "$name"
     label 'process_medium'
-    
+
   input:
   set ( sampleprefix, file(unsortedsam) ) from samfile
 
@@ -475,7 +478,7 @@ process baserecalibrationtable {
   file(fastaFai) from ch_fastaFai
   file(knownIndels) from ch_knownIndels
   file(knownIndelsIndex) from ch_knownIndelsIndex
-  
+
   output:
   set ( sampleprefix, file("${sampleprefix}.recal_data.table") ) into recaltable
 
@@ -717,9 +720,9 @@ process output_documentation {
 workflow.onComplete {
 
     // Set up the e-mail variables
-    def subject = "[nibscbioinformatics/scoop] Successful: $workflow.runName"
+    def subject = "[nibscbioinformatics/humgen] Successful: $workflow.runName"
     if (!workflow.success) {
-        subject = "[nibscbioinformatics/scoop] FAILED: $workflow.runName"
+        subject = "[nibscbioinformatics/humgen] FAILED: $workflow.runName"
     }
     def email_fields = [:]
     email_fields['version'] = workflow.manifest.version
@@ -750,12 +753,12 @@ workflow.onComplete {
         if (workflow.success) {
             mqc_report = ch_multiqc_report.getVal()
             if (mqc_report.getClass() == ArrayList) {
-                log.warn "[nibscbioinformatics/scoop] Found multiple reports from process 'multiqc', will use only one"
+                log.warn "[nibscbioinformatics/humgen] Found multiple reports from process 'multiqc', will use only one"
                 mqc_report = mqc_report[0]
             }
         }
     } catch (all) {
-        log.warn "[nibscbioinformatics/scoop] Could not attach MultiQC report to summary email"
+        log.warn "[nibscbioinformatics/humgen] Could not attach MultiQC report to summary email"
     }
 
     // Check if we are only sending emails on failure
@@ -787,11 +790,11 @@ workflow.onComplete {
             if (params.plaintext_email) { throw GroovyException('Send plaintext e-mail, not HTML') }
             // Try to send HTML e-mail using sendmail
             [ 'sendmail', '-t' ].execute() << sendmail_html
-            log.info "[nibscbioinformatics/scoop] Sent summary e-mail to $email_address (sendmail)"
+            log.info "[nibscbioinformatics/humgen] Sent summary e-mail to $email_address (sendmail)"
         } catch (all) {
             // Catch failures and try with plaintext
             [ 'mail', '-s', subject, email_address ].execute() << email_txt
-            log.info "[nibscbioinformatics/scoop] Sent summary e-mail to $email_address (mail)"
+            log.info "[nibscbioinformatics/humgen] Sent summary e-mail to $email_address (mail)"
         }
     }
 
@@ -817,10 +820,10 @@ workflow.onComplete {
     }
 
     if (workflow.success) {
-        log.info "-${c_purple}[nibscbioinformatics/scoop]${c_green} Pipeline completed successfully${c_reset}-"
+        log.info "-${c_purple}[nibscbioinformatics/humgen]${c_green} Pipeline completed successfully${c_reset}-"
     } else {
         checkHostname()
-        log.info "-${c_purple}[nibscbioinformatics/scoop]${c_red} Pipeline completed with errors${c_reset}-"
+        log.info "-${c_purple}[nibscbioinformatics/humgen]${c_red} Pipeline completed with errors${c_reset}-"
     }
 
 }
@@ -844,7 +847,7 @@ def nfcoreHeader() {
     ${c_blue}  |\\ | |__  __ /  ` /  \\ |__) |__         ${c_yellow}}  {${c_reset}
     ${c_blue}  | \\| |       \\__, \\__/ |  \\ |___     ${c_green}\\`-._,-`-,${c_reset}
                                             ${c_green}`._,._,\'${c_reset}
-    ${c_purple}  nibscbioinformatics/scoop v${workflow.manifest.version}${c_reset}
+    ${c_purple}  nibscbioinformatics/humgen v${workflow.manifest.version}${c_reset}
     -${c_dim}--------------------------------------------------${c_reset}-
     """.stripIndent()
 }
