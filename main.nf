@@ -421,7 +421,7 @@ process dotrimlog {
 }
 
 if (!params.trim) {
-  trimmingoutput1 = inputSample.map {it[0], it[1][0], it[1][1]}
+  trimmingoutput1 = inputSample.map {mixup -> tuple(mixup[0], mixup[1][0], mixup[1][1])}
 }
 
 //BWA alignment of samples, and sorting to BAM format
