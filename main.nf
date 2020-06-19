@@ -123,6 +123,7 @@ summary['Golden Indels']    = params.goldindels
 summary['Normal Panel']     = params.normpanel
 summary['Fasta Reference']  = params.genomefasta
 summary['Gnomad Reference'] = params.gnomad
+summary['Adapter Refernce'] = params.adapter
 summary['Max Resources']    = "$params.max_memory memory, $params.max_cpus cpus, $params.max_time time per job"
 if (workflow.containerEngine) summary['Container'] = "$workflow.containerEngine - $workflow.container"
 summary['Output dir']       = params.outdir
@@ -130,7 +131,6 @@ summary['Launch dir']       = workflow.launchDir
 summary['Working dir']      = workflow.workDir
 summary['Script dir']       = workflow.projectDir
 summary['User']             = workflow.userName
-summary['Analysis Type']    = params.tool
 if (workflow.profile.contains('awsbatch')) {
     summary['AWS Region']   = params.awsregion
     summary['AWS Queue']    = params.awsqueue
@@ -385,7 +385,7 @@ process docutadapt {
   tag "trimming ${sampleprefix}"
 
   input:
-  tuple sampleprefix, file(forward), file(reverse) from inputSample
+  tuple sampleprefix, file(samples) from inputSample
   file(adapterfile) from ch_adapter
 
   output:
@@ -394,7 +394,7 @@ process docutadapt {
 
   script:
   """
-  cutadapt -a file:${adapterfile} -A file:${adapterfile} -g file:${adapterfile} -G file:${adapterfile} -o ${sampleprefix}.R1.trimmed.fastq.gz -p ${sampleprefix}.R2.trimmed.fastq.gz $forward $reverse -q 30,30 --minimum-length 50 --times 40 -e 0.1 --max-n 0 > ${sampleprefix}.trim.out 2> ${sampleprefix}.trim.err
+  cutadapt -a file:${adapterfile} -A file:${adapterfile} -g file:${adapterfile} -G file:${adapterfile} -o ${sampleprefix}.R1.trimmed.fastq.gz -p ${sampleprefix}.R2.trimmed.fastq.gz ${samples[0]} ${samples[1]} -q 30,30 --minimum-length 50 --times 40 -e 0.1 --max-n 0 > ${sampleprefix}.trim.out 2> ${sampleprefix}.trim.err
   """
 }
 
@@ -463,11 +463,11 @@ process baserecalibrationtable {
   input:
   set ( sampleprefix, file(markedbamfile) ) from markedbamfortable
   file(dbsnp) from ch_dbsnp
-  file(dbsnpIndex) from ch_dbsnpIndex
+  file(dbsnpIndex) from dbsnpIndexBuilt
   file(fasta) from ch_genomefasta
-  file(fastaFai) from ch_genomefastaFai
+  file(fastaFai) from fastaFaiBuilt
   file(knownIndels) from ch_goldindels
-  file(knownIndelsIndex) from ch_goldindelsIndex
+  file(knownIndelsIndex) from knownIndelsIndexBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.recal_data.table") ) into recaltable
@@ -529,9 +529,9 @@ process haplotypecall {
   input:
   set ( sampleprefix, file(bamfile), file(baifile) ) from forcaller1
   file(dbsnp) from ch_dbsnp
-  file(dbsnpIndex) from ch_dbsnpIndex
+  file(dbsnpIndex) from dbsnpIndexBuilt
   file(fasta) from ch_genomefasta
-  file(fastaFai) from ch_genomefastaFai
+  file(fastaFai) from fastaFaiBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.hapcalled.vcf") ) into calledhaps
@@ -549,11 +549,11 @@ process mutectcall {
   input:
   set ( sampleprefix, file(bamfile), file(baifile) ) from forcaller2
   file(fasta) from ch_genomefasta
-  file(fastaFai) from ch_genomefastaFai
+  file(fastaFai) from fastaFaiBuilt
   file(gnomad) from ch_gnomad
-  file(gnomadindex) from ch_gnomadIndex
+  file(gnomadindex) from gnomadIndexBuilt
   file(normpanel) from ch_normPanel
-  file(normpanelindex) from ch_normPanelIndex
+  file(normpanelindex) from ponIndexBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.mutcalled.vcf"), file("${sampleprefix}.mutcalled.vcf.stats") ) into calledmuts
@@ -571,7 +571,7 @@ process mutectfilter {
   input:
   set ( sampleprefix, file(mutvcf), file(mutstats) ) from calledmuts
   file(fasta) from ch_genomefasta
-  file(fastafai) from ch_genomefastaFai
+  file(fastafai) from fastaFaiBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.mutcalled.filtered.vcf") ) into filteredmuts
@@ -611,7 +611,7 @@ process hardfilter {
   input:
   set ( sampleprefix, file(hapsnp), file(hapindel), file(mutsnp), file(mutindel) ) from splitupvars
   file(fasta) from ch_genomefasta
-  file(fastafai) from ch_genomefastaFai
+  file(fastafai) from fastaFaiBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.germline.filtered.snp.vcf"), file("${sampleprefix}.germline.filtered.indel.vcf"), file("${sampleprefix}.somatic.filtered.snp.vcf"), file("${sampleprefix}.somatic.filtered.indel.vcf") ) into filteredvars
@@ -650,9 +650,9 @@ process variantevaluation {
   input:
   set ( sampleprefix, file(germline), file(germlineindex), file(somatic), file(somaticindex) ) from germsomvars1
   file(dbsnp) from ch_dbsnp
-  file(dbsnpIndex) from ch_dbsnpIndex
+  file(dbsnpIndex) from dbsnpIndexBuilt
   file(fasta) from ch_genomefasta
-  file(fastaFai) from ch_genomefastaFai
+  file(fastaFai) from fastaFaiBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.germline.eval.grp"), file("${sampleprefix}.somatic.eval.grp") ) into variantevaluations
