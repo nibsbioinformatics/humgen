@@ -95,16 +95,20 @@ ch_adapter = Channel.value(file(params.adapter, checkIfExists: true))
 if (params.human_reference && params.genome && !params.human_reference.containsKey(params.genome)) {
    exit 1, "The provided genome '${params.genome}' is not available in the humanref.config file. Currently the available genomes are ${params.genomes.keySet().join(", ")}"
 }
-params.dbsnp = params.human_reference[params.genome].dbsnp
-ch_dbsnp = Channel.value(file(params.dbsnp, checkIfExists: true))
-params.goldindels = params.human_reference[params.genome].goldindels
-ch_goldindels = Channel.value(file(params.goldindels, checkIfExists: true))
-params.normpanel = params.human_reference[params.genome].normpanel
-ch_normpanel = Channel.value(file(params.normpanel, checkIfExists: true))
-params.genomefasta = params.human_reference[params.genome].genomefasta
-ch_genomefasta = Channel.value(file(params.genomefasta, checkIfExists: true))
-params.gnomad = params.human_reference[params.genome].gnomad
-ch_gnomad = Channel.value(file(params.gnomad, checkIfExists: true))
+params.dbsnp = params.genome ? params.human_reference[params.genome].dbsnp ?: null : null
+if (params.dbsnp) { ch_dbsnp = Channel.value(file(params.dbsnp, checkIfExists: true)) }
+
+params.goldindels = params.genome ? params.human_reference[params.genome].goldindels ?: null : null
+if (params.goldindels) { ch_goldindels = Channel.value(file(params.goldindels, checkIfExists: true)) }
+
+params.normpanel = params.genome ? params.human_reference[params.genome].normpanel ?: null : null
+if (params.normpanel) { ch_normpanel = Channel.value(file(params.normpanel, checkIfExists: true)) }
+
+params.genomefasta = params.genome ? params.human_reference[params.genome].genomefasta ?: null : null
+if (params.genomefasta) { ch_genomefasta = Channel.value(file(params.genomefasta, checkIfExists: true)) }
+
+params.gnomad = params.genome ? params.human_reference[params.genome].gnomad ?: null : null
+if (params.gnomad) { ch_gnomad = Channel.value(file(params.gnomad, checkIfExists: true)) }
 
 
 // Header log info
