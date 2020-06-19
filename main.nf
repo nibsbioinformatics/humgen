@@ -28,6 +28,7 @@ def helpMessage() {
     Optional arguments:
       --genome [genome ID]            A genome reference given in the config file humanref.config
                                       Currently defaults to only available option hg19
+      --adapter [adapter file]        A FASTA file for the adapter sequences to be trimmed
 
     Other options:
       --outdir [file]                 The output directory where the results will be saved
@@ -80,7 +81,16 @@ ch_output_docs = file("$baseDir/docs/output.md", checkIfExists: true)
  // Use an approach like:
  // ch_nucleotide_db = params.nucletide_db ? Channel.value(file(params.nucletide_db)) : "null";
 
+//input channel of (sampleprefix, forward, reverse)
+ Channel
+     .fromFilePairs("$params.input/*_{R1,R2}*.fastq.gz")
+     .ifEmpty { error "Cannot find any reads matching ${params.input}"}
+     .set { readpairs }
+(ch_read_files_fastqc, inputSample) = readpairs.into(2)
+
 params.genome = "hg19" //this is the default and at the moment the only with all the reference files
+params.adapter = "/usr/share/sequencing/references/adapters/TruSeq-adapters-recommended.fa" //change this based on the adapter to trim
+ch_adapter = Channel.value(file(params.adapter, checkIfExists: true))
 
 if (params.human_reference && params.genome && !params.human_reference.containsKey(params.genome)) {
    exit 1, "The provided genome '${params.genome}' is not available in the humanref.config file. Currently the available genomes are ${params.genomes.keySet().join(", ")}"
@@ -365,36 +375,63 @@ process output_documentation {
     """
 }
 
-//NIBSC-GATK-IMPLEMENTATION-START with alignment
-process doalignment {
-    label 'process_high'
-
-    input:
-    set val(sampleprefix), file(reads) from ch_read_files_trimming
-    file(fasta) from ch_fasta
-    file(fastaFai) from ch_fastaFai
-
-    output:
-    set ( sampleprefix, file("${sampleprefix}.unsorted.sam") ) into samfile
-
-    script:
-    """
-    bwa mem -t ${task.cpus} -M -R '@RG\\tID:${sampleprefix}\\tSM:${sampleprefix}\\tPL:Illumina' $fasta $reads > ${sampleprefix}.unsorted.sam
-    """
-}
-
-//NIBSC 2 - sort sam file to bam alignment
-process sorttobam {
-    label 'process_medium'
+//Trimming of adapters and low-quality bases - note hardcoded parameters in command
+process docutadapt {
+  label 'process_medium'
+  tag "trimming ${sampleprefix}"
 
   input:
-  set ( sampleprefix, file(unsortedsam) ) from samfile
+  tuple sampleprefix, file(forward), file(reverse) from inputSample
+  file(adapterfile) from ch_adapter
 
   output:
-  set ( sampleprefix, file("${sampleprefix}.sorted.bam") ) into sortedbam
+  set ( sampleprefix, file("${sampleprefix}.R1.trimmed.fastq.gz"), file("${sampleprefix}.R2.trimmed.fastq.gz") ) into (trimmingoutput1, trimmingoutput2)
+  file("${sampleprefix}.trim.out") into trimouts
 
+  script:
   """
-  samtools sort -o ${sampleprefix}.sorted.bam -O BAM -@ ${task.cpus} ${unsortedsam}
+  cutadapt -a file:${adapterfile} -A file:${adapterfile} -g file:${adapterfile} -G file:${adapterfile} -o ${sampleprefix}.R1.trimmed.fastq.gz -p ${sampleprefix}.R2.trimmed.fastq.gz $forward $reverse -q 30,30 --minimum-length 50 --times 40 -e 0.1 --max-n 0 > ${sampleprefix}.trim.out 2> ${sampleprefix}.trim.err
+  """
+}
+
+//Produce output CSV table of trimming stats for reading in R
+process dotrimlog {
+  publishDir "$params.outdir/stats/trimming/", mode: "copy"
+  label 'process_low'
+
+  input:
+  file "logdir/*" from trimouts.toSortedList()
+
+  output:
+  file("trimming-summary.csv") into trimlogend
+
+  script:
+  """
+  python $baseDir/scripts/logger.py logdir trimming-summary.csv cutadapt
+  """
+}
+
+//BWA alignment of samples, and sorting to BAM format
+process doalignment {
+  label 'process_high'
+
+  input:
+  set (sampleprefix, file(forwardtrimmed), file(reversetrimmed)) from trimmingoutput1
+  file( fastaref ) from ch_genomefasta
+  file ( bwaindex ) from ch_bwaIndex
+
+  output:
+  set (sampleprefix, file("${sampleprefix}_sorted.bam") ) into sortedbam
+
+  script:
+  """
+  bwa mem \
+  -t ${task.cpus} \
+  -R '@RG\\tID:${sampleprefix}\\tSM:${sampleprefix}\\tPL:Illumina' \
+  $fastaref \
+  ${forwardtrimmed} ${reversetrimmed} \
+  | samtools sort -@ ${task.cpus} \
+  -o ${sampleprefix}_sorted.bam -O BAM
   """
 }
 
@@ -423,8 +460,8 @@ process baserecalibrationtable {
   set ( sampleprefix, file(markedbamfile) ) from markedbamfortable
   file(dbsnp) from ch_dbsnp
   file(dbsnpIndex) from ch_dbsnpIndex
-  file(fasta) from ch_fasta
-  file(fastaFai) from ch_fastaFai
+  file(fasta) from ch_genomefasta
+  file(fastaFai) from ch_genomefastaFai
   file(knownIndels) from ch_goldindels
   file(knownIndelsIndex) from ch_goldindelsIndex
 
@@ -489,8 +526,8 @@ process haplotypecall {
   set ( sampleprefix, file(bamfile), file(baifile) ) from forcaller1
   file(dbsnp) from ch_dbsnp
   file(dbsnpIndex) from ch_dbsnpIndex
-  file(fasta) from ch_fasta
-  file(fastaFai) from ch_fastaFai
+  file(fasta) from ch_genomefasta
+  file(fastaFai) from ch_genomefastaFai
 
   output:
   set ( sampleprefix, file("${sampleprefix}.hapcalled.vcf") ) into calledhaps
@@ -507,8 +544,8 @@ process mutectcall {
 
   input:
   set ( sampleprefix, file(bamfile), file(baifile) ) from forcaller2
-  file(fasta) from ch_fasta
-  file(fastaFai) from ch_fastaFai
+  file(fasta) from ch_genomefasta
+  file(fastaFai) from ch_genomefastaFai
   file(gnomad) from ch_gnomad
   file(gnomadindex) from ch_gnomadIndex
   file(normpanel) from ch_normPanel
@@ -529,8 +566,8 @@ process mutectfilter {
 
   input:
   set ( sampleprefix, file(mutvcf), file(mutstats) ) from calledmuts
-  file(fasta) from ch_fasta
-  file(fastafai) from ch_fastaFai
+  file(fasta) from ch_genomefasta
+  file(fastafai) from ch_genomefastaFai
 
   output:
   set ( sampleprefix, file("${sampleprefix}.mutcalled.filtered.vcf") ) into filteredmuts
@@ -569,8 +606,8 @@ process hardfilter {
 
   input:
   set ( sampleprefix, file(hapsnp), file(hapindel), file(mutsnp), file(mutindel) ) from splitupvars
-  file(fasta) from ch_fasta
-  file(fastafai) from ch_fastaFai
+  file(fasta) from ch_genomefasta
+  file(fastafai) from ch_genomefastaFai
 
   output:
   set ( sampleprefix, file("${sampleprefix}.germline.filtered.snp.vcf"), file("${sampleprefix}.germline.filtered.indel.vcf"), file("${sampleprefix}.somatic.filtered.snp.vcf"), file("${sampleprefix}.somatic.filtered.indel.vcf") ) into filteredvars
@@ -610,8 +647,8 @@ process variantevaluation {
   set ( sampleprefix, file(germline), file(germlineindex), file(somatic), file(somaticindex) ) from germsomvars1
   file(dbsnp) from ch_dbsnp
   file(dbsnpIndex) from ch_dbsnpIndex
-  file(fasta) from ch_fasta
-  file(fastaFai) from ch_fastaFai
+  file(fasta) from ch_genomefasta
+  file(fastaFai) from ch_genomefastaFai
 
   output:
   set ( sampleprefix, file("${sampleprefix}.germline.eval.grp"), file("${sampleprefix}.somatic.eval.grp") ) into variantevaluations
