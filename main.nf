@@ -87,7 +87,7 @@ ch_output_docs = file("$baseDir/docs/output.md", checkIfExists: true)
      .fromFilePairs("$params.input/*_{R1,R2}*.fastq.gz")
      .ifEmpty { error "Cannot find any reads matching ${params.input}"}
      .set { readpairs }
-(ch_read_files_fastqc, inputSample) = readpairs.into(2)
+(ch_read_files_fastqc, inputSample, inputAlreadyTrimmed) = readpairs.into(3)
 
 params.genome = "hg19" //this is the default and at the moment the only with all the reference files
 params.adapter = "/usr/share/sequencing/references/adapters/TruSeq-adapters-recommended.fa" //change this based on the adapter to trim
@@ -421,7 +421,7 @@ process dotrimlog {
 }
 
 if (!params.trim) {
-  trimmingoutput1 = inputSample.map {mixup -> tuple(mixup[0], mixup[1][0], mixup[1][1])}
+  trimmingoutput1 = inputAlreadyTrimmed.map {mixup -> tuple(mixup[0], mixup[1][0], mixup[1][1])}
 }
 
 //BWA alignment of samples, and sorting to BAM format
