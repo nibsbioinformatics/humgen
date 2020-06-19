@@ -29,6 +29,7 @@ def helpMessage() {
       --genome [genome ID]            A genome reference given in the config file humanref.config
                                       Currently defaults to only available option hg19
       --adapter [adapter file]        A FASTA file for the adapter sequences to be trimmed
+      --trim                          Trim the sequence data before continuing with alignment
 
     Other options:
       --outdir [file]                 The output directory where the results will be saved
@@ -91,6 +92,7 @@ ch_output_docs = file("$baseDir/docs/output.md", checkIfExists: true)
 params.genome = "hg19" //this is the default and at the moment the only with all the reference files
 params.adapter = "/usr/share/sequencing/references/adapters/TruSeq-adapters-recommended.fa" //change this based on the adapter to trim
 ch_adapter = Channel.value(file(params.adapter, checkIfExists: true))
+params.trim = false
 
 if (params.human_reference && params.genome && !params.human_reference.containsKey(params.genome)) {
    exit 1, "The provided genome '${params.genome}' is not available in the humanref.config file. Currently the available genomes are ${params.genomes.keySet().join(", ")}"
@@ -386,8 +388,11 @@ process docutadapt {
   file(adapterfile) from ch_adapter
 
   output:
-  set ( sampleprefix, file("${sampleprefix}.R1.trimmed.fastq.gz"), file("${sampleprefix}.R2.trimmed.fastq.gz") ) into (trimmingoutput1, trimmingoutput2)
+  set ( sampleprefix, file("${sampleprefix}.R1.trimmed.fastq.gz"), file("${sampleprefix}.R2.trimmed.fastq.gz") ) into trimmingoutput1
   file("${sampleprefix}.trim.out") into trimouts
+
+  when:
+  params.trim
 
   script:
   """
@@ -406,10 +411,17 @@ process dotrimlog {
   output:
   file("trimming-summary.csv") into trimlogend
 
+  when:
+  params.trim
+
   script:
   """
   python $baseDir/scripts/logger.py logdir trimming-summary.csv cutadapt
   """
+}
+
+if (!params.trim) {
+  trimmingoutput1 = inputSample.map {it[0], it[1][0], it[1][1]}
 }
 
 //BWA alignment of samples, and sorting to BAM format
