@@ -250,21 +250,15 @@ process BuildDbsnpIndex {
     """
 }
 
-ch_dbsnpIndex = params.dbsnp ? params.dbsnpIndex ? Channel.value(file(params.dbsnpIndex)) : dbsnpIndexBuilt : "null"
-
+//Index the gnomad germline resource
 process BuildGermlineResourceIndex {
-    tag {germlineResource}
-
-    publishDir params.outdir, mode: params.publishDirMode,
-        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+    label 'process_medium'
 
     input:
-        file(germlineResource) from ch_germlineResource
+    file(germlineResource) from ch_gnomad
 
     output:
-        file("${germlineResource}.tbi") into germlineResourceIndexBuilt
-
-    when: !(params.germlineResourceIndex) && params.germlineResource && 'mutect2' in tools
+    file("${germlineResource}.tbi") into gnomadIndexBuilt
 
     script:
     """
@@ -272,21 +266,18 @@ process BuildGermlineResourceIndex {
     """
 }
 
-ch_germlineResourceIndex = params.germlineResource ? params.germlineResourceIndex ? Channel.value(file(params.germlineResourceIndex)) : germlineResourceIndexBuilt : "null"
-
+//tabix index for the gold indels reference file
 process BuildKnownIndelsIndex {
-    tag {knownIndels}
+    label 'process_medium'
 
     publishDir params.outdir, mode: params.publishDirMode,
         saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
 
     input:
-        each file(knownIndels) from ch_knownIndels
+    file(knownIndels) from ch_goldindels
 
     output:
-        file("${knownIndels}.tbi") into knownIndelsIndexBuilt
-
-    when: !(params.knownIndelsIndex) && params.knownIndels && 'mapping' in step
+    file("${knownIndels}.tbi") into knownIndelsIndexBuilt
 
     script:
     """
@@ -294,21 +285,15 @@ process BuildKnownIndelsIndex {
     """
 }
 
-ch_knownIndelsIndex = params.knownIndels ? params.knownIndelsIndex ? Channel.value(file(params.knownIndelsIndex)) : knownIndelsIndexBuilt.collect() : "null"
-
+//tabix index for panel of normals reference for mutect somatic calling
 process BuildPonIndex {
-    tag {pon}
-
-    publishDir params.outdir, mode: params.publishDirMode,
-        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
+    label 'process_medium'
 
     input:
-        file(pon) from ch_pon
+    file(pon) from ch_normpanel
 
     output:
-        file("${pon}.tbi") into ponIndexBuilt
-
-    when: !(params.pon_index) && params.pon && ('tnscope' in tools || 'mutect2' in tools)
+    file("${pon}.tbi") into ponIndexBuilt
 
     script:
     """
@@ -316,13 +301,7 @@ process BuildPonIndex {
     """
 }
 
-ch_ponIndex = params.pon_index ? Channel.value(file(params.pon_index)) : ponIndexBuilt
-
-
-
-/*
- * QC STEP 1
- */
+//QC step 1
 process fastqc {
     tag "$name"
     label 'process_medium'
@@ -343,9 +322,7 @@ process fastqc {
     """
 }
 
-/*
- * QC STEP 2
- */
+//QC step 2
 process multiqc {
     publishDir "${params.outdir}/MultiQC", mode: 'copy'
 
@@ -372,9 +349,7 @@ process multiqc {
     """
 }
 
-/*
- * STEP 3 - Output Description HTML
- */
+//Output HTML from template (not report)
 process output_documentation {
     publishDir "${params.outdir}/pipeline_info", mode: 'copy'
 
@@ -390,12 +365,9 @@ process output_documentation {
     """
 }
 
-/*
- * NIBSC-GATK-IMPLEMENTATION-START
- */
+//NIBSC-GATK-IMPLEMENTATION-START with alignment
 process doalignment {
-    tag "$name"
-    label 'process_medium'
+    label 'process_high'
 
     input:
     set val(sampleprefix), file(reads) from ch_read_files_trimming
@@ -413,7 +385,6 @@ process doalignment {
 
 //NIBSC 2 - sort sam file to bam alignment
 process sorttobam {
-    tag "$name"
     label 'process_medium'
 
   input:
@@ -454,8 +425,8 @@ process baserecalibrationtable {
   file(dbsnpIndex) from ch_dbsnpIndex
   file(fasta) from ch_fasta
   file(fastaFai) from ch_fastaFai
-  file(knownIndels) from ch_knownIndels
-  file(knownIndelsIndex) from ch_knownIndelsIndex
+  file(knownIndels) from ch_goldindels
+  file(knownIndelsIndex) from ch_goldindelsIndex
 
   output:
   set ( sampleprefix, file("${sampleprefix}.recal_data.table") ) into recaltable
@@ -538,8 +509,8 @@ process mutectcall {
   set ( sampleprefix, file(bamfile), file(baifile) ) from forcaller2
   file(fasta) from ch_fasta
   file(fastaFai) from ch_fastaFai
-  file(gnomad) from ch_germlineResource
-  file(gnomadindex) from ch_germlineResourceIndex
+  file(gnomad) from ch_gnomad
+  file(gnomadindex) from ch_gnomadIndex
   file(normpanel) from ch_normPanel
   file(normpanelindex) from ch_normPanelIndex
 
