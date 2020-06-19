@@ -284,9 +284,6 @@ process BuildGermlineResourceIndex {
 process BuildKnownIndelsIndex {
     label 'process_medium'
 
-    publishDir params.outdir, mode: params.publishDirMode,
-        saveAs: {params.saveGenomeIndex ? "reference_genome/${it}" : null }
-
     input:
     file(knownIndels) from ch_goldindels
 
@@ -552,7 +549,7 @@ process mutectcall {
   file(fastaFai) from fastaFaiBuilt
   file(gnomad) from ch_gnomad
   file(gnomadindex) from gnomadIndexBuilt
-  file(normpanel) from ch_normPanel
+  file(normpanel) from ch_normpanel
   file(normpanelindex) from ponIndexBuilt
 
   output:
