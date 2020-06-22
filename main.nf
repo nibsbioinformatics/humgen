@@ -583,6 +583,7 @@ process haplotypecall {
   file(dbsnpIndex) from dbsnpIndexBuilt
   file(fasta) from ch_genomefasta
   file(fastaFai) from fastaFaiBuilt
+  file(fastadict) from dictBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.hapcalled.vcf") ) into calledhaps
@@ -605,6 +606,7 @@ process mutectcall {
   file(gnomadindex) from gnomadIndexBuilt
   file(normpanel) from ch_normpanel
   file(normpanelindex) from ponIndexBuilt
+  file(fastadict) from dictBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.mutcalled.vcf"), file("${sampleprefix}.mutcalled.vcf.stats") ) into calledmuts
@@ -623,6 +625,7 @@ process mutectfilter {
   set ( sampleprefix, file(mutvcf), file(mutstats) ) from calledmuts
   file(fasta) from ch_genomefasta
   file(fastafai) from fastaFaiBuilt
+  file(fastadict) from dictBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.mutcalled.filtered.vcf") ) into filteredmuts
