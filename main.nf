@@ -99,18 +99,29 @@ if (params.human_reference && params.genome && !params.human_reference.containsK
 }
 params.dbsnp = params.genome ? params.human_reference[params.genome].dbsnp ?: null : null
 if (params.dbsnp) { ch_dbsnp = Channel.value(file(params.dbsnp, checkIfExists: true)) }
+params.dbsnpindex = params.genome ? params.human_reference[params.genome].dbsnpindex ?: null : null
 
 params.goldindels = params.genome ? params.human_reference[params.genome].goldindels ?: null : null
 if (params.goldindels) { ch_goldindels = Channel.value(file(params.goldindels, checkIfExists: true)) }
+params.goldindelsindex = params.genome ? params.human_reference[params.genome].goldindelsindex ?: null : null
 
 params.normpanel = params.genome ? params.human_reference[params.genome].normpanel ?: null : null
 if (params.normpanel) { ch_normpanel = Channel.value(file(params.normpanel, checkIfExists: true)) }
+params.normpanelindex = params.genome ? params.human_reference[params.genome].normpanelindex ?: null : null
 
 params.genomefasta = params.genome ? params.human_reference[params.genome].genomefasta ?: null : null
 if (params.genomefasta) { ch_genomefasta = Channel.value(file(params.genomefasta, checkIfExists: true)) }
+params.genomefastafai = params.genome ? params.human_reference[params.genome].genomefastafai ?: null : null
+params.genomefastadict = params.genome ? params.human_reference[params.genome].genomefastadict ?: null : null
+params.genomefastaamb = params.genome ? params.human_reference[params.genome].genomefastaamb ?: null : null
+params.genomefastaann = params.genome ? params.human_reference[params.genome].genomefastaann ?: null : null
+params.genomefastabwt = params.genome ? params.human_reference[params.genome].genomefastabwt ?: null : null
+params.genomefastapac = params.genome ? params.human_reference[params.genome].genomefastapac ?: null : null
+params.genomefastasa = params.genome ? params.human_reference[params.genome].genomefastasa ?: null : null
 
 params.gnomad = params.genome ? params.human_reference[params.genome].gnomad ?: null : null
 if (params.gnomad) { ch_gnomad = Channel.value(file(params.gnomad, checkIfExists: true)) }
+params.gnomadindex = params.genome ? params.human_reference[params.genome].gnomadindex ?: null : null
 
 
 // Header log info
@@ -209,10 +220,16 @@ process BuildBWAindexes {
     output:
     file("${fasta}.*") into ch_bwaIndex
 
+    when:
+    !(params.genomefastaamb && params.genomefastaann && params.genomefastabwt && params.genomefastapac && params.genomefastasa)
+
     script:
     """
     bwa index ${fasta}
     """
+}
+if (params.genomefastaamb && params.genomefastaann && params.genomefastabwt && params.genomefastapac && params.genomefastasa) {
+  ch_bwaIndex = Channel.from(file(params.genomefastaamb), file(params.genomefastaann), file(params.genomefastabwt), file(params.genomefastapac), file(params.genomefastasa)).collect()
 }
 
 //Create sequence dictionary from reference fasta
@@ -225,6 +242,9 @@ process BuildDict {
     output:
     file("${fasta.baseName}.dict") into dictBuilt
 
+    when:
+    !params.genomefastadict
+
     script:
     """
     gatk --java-options "-Xmx${task.memory.toGiga()}g" \
@@ -233,6 +253,7 @@ process BuildDict {
         --OUTPUT ${fasta.baseName}.dict
     """
 }
+if (params.genomefastadict) { dictBuilt = Channel.value(file(params.genomefastadict, checkIfExists: true)) }
 
 //Make SAMTools FAI index of reference fasta
 process BuildFastaFai {
@@ -244,11 +265,15 @@ process BuildFastaFai {
     output:
     file("${fasta}.fai") into fastaFaiBuilt
 
+    when:
+    !params.genomefastafai
+
     script:
     """
     samtools faidx ${fasta}
     """
 }
+if (params.genomefastafai) { fastaFaiBuilt = Channel.value(file(params.genomefastafai, checkIfExists: true)) }
 
 //Build index for dbSNP reference
 process BuildDbsnpIndex {
@@ -260,11 +285,15 @@ process BuildDbsnpIndex {
     output:
     file("${dbsnp}.idx") into dbsnpIndexBuilt
 
+    when:
+    !params.dbsnpindex
+
     script:
     """
     gatk IndexFeatureFile -F $dbsnp
     """
 }
+if (params.dbsnpindex) { dbsnpIndexBuilt = Channel.value(file(params.dbsnpindex, checkIfExists: true)) }
 
 //Index the gnomad germline resource
 process BuildGermlineResourceIndex {
@@ -276,11 +305,15 @@ process BuildGermlineResourceIndex {
     output:
     file("${germlineResource}.idx") into gnomadIndexBuilt
 
+    when:
+    !params.gnomadindex
+
     script:
     """
     gatk IndexFeatureFile -F $germlineResource
     """
 }
+if (params.gnomadindex) { gnomadIndexBuilt = Channel.value(file(params.gnomadindex, checkIfExists: true)) }
 
 //index for the gold indels reference file
 process BuildKnownIndelsIndex {
@@ -292,11 +325,15 @@ process BuildKnownIndelsIndex {
     output:
     file("${knownIndels}.idx") into knownIndelsIndexBuilt
 
+    when:
+    !params.goldindelsindex
+
     script:
     """
     gatk IndexFeatureFile -F $knownIndels
     """
 }
+if (params.goldindelsindex) { knownIndelsIndexBuilt = Channel.value(file(params.goldindelsindex, checkIfExists: true)) }
 
 //index for panel of normals reference for mutect somatic calling
 process BuildPonIndex {
@@ -308,11 +345,15 @@ process BuildPonIndex {
     output:
     file("${pon}.idx") into ponIndexBuilt
 
+    when:
+    !params.normpanelindex
+
     script:
     """
     gatk IndexFeatureFile -F $pon
     """
 }
+if (params.normpanelindex) { ponIndexBuilt = Channel.value(file(params.normpanelindex, checkIfExists: true)) }
 
 //QC step 1
 process fastqc {
@@ -477,6 +518,7 @@ process baserecalibrationtable {
   file(fastaFai) from fastaFaiBuilt
   file(knownIndels) from ch_goldindels
   file(knownIndelsIndex) from knownIndelsIndexBuilt
+  file(fastadict) from dictBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.recal_data.table") ) into recaltable
