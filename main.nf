@@ -250,7 +250,7 @@ process BuildFastaFai {
     """
 }
 
-//Build tabix index for dbSNP reference
+//Build index for dbSNP reference
 process BuildDbsnpIndex {
     label 'process_medium'
 
@@ -258,11 +258,11 @@ process BuildDbsnpIndex {
     file(dbsnp) from ch_dbsnp
 
     output:
-    file("${dbsnp}.tbi") into dbsnpIndexBuilt
+    file("${dbsnp}.idx") into dbsnpIndexBuilt
 
     script:
     """
-    tabix -p vcf ${dbsnp}
+    gatk IndexFeatureFile -F $dbsnp
     """
 }
 
@@ -274,15 +274,15 @@ process BuildGermlineResourceIndex {
     file(germlineResource) from ch_gnomad
 
     output:
-    file("${germlineResource}.tbi") into gnomadIndexBuilt
+    file("${germlineResource}.idx") into gnomadIndexBuilt
 
     script:
     """
-    tabix -p vcf ${germlineResource}
+    gatk IndexFeatureFile -F $germlineResource
     """
 }
 
-//tabix index for the gold indels reference file
+//index for the gold indels reference file
 process BuildKnownIndelsIndex {
     label 'process_medium'
 
@@ -290,15 +290,15 @@ process BuildKnownIndelsIndex {
     file(knownIndels) from ch_goldindels
 
     output:
-    file("${knownIndels}.tbi") into knownIndelsIndexBuilt
+    file("${knownIndels}.idx") into knownIndelsIndexBuilt
 
     script:
     """
-    tabix -p vcf ${knownIndels}
+    gatk IndexFeatureFile -F $knownIndels
     """
 }
 
-//tabix index for panel of normals reference for mutect somatic calling
+//index for panel of normals reference for mutect somatic calling
 process BuildPonIndex {
     label 'process_medium'
 
@@ -306,11 +306,11 @@ process BuildPonIndex {
     file(pon) from ch_normpanel
 
     output:
-    file("${pon}.tbi") into ponIndexBuilt
+    file("${pon}.idx") into ponIndexBuilt
 
     script:
     """
-    tabix -p vcf ${pon}
+    gatk IndexFeatureFile -F $pon
     """
 }
 
