@@ -501,10 +501,12 @@ process doalignment {
   """
 }
 
+//if it was specified to start from BAM files as input to the pipeline, then create a channel of them here
 if (params.frombam) {
   baminput = Channel.fromPath("$params.input/*.bam").ifEmpty{error "Cannot find any BAM files in directory ${params.input}"}
 }
 
+//Take input BAM files from start input directory and convert back to fastq before alignment again
 process AlignBamFile {
   label 'process_high'
 
