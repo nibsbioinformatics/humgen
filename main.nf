@@ -29,7 +29,8 @@ def helpMessage() {
       --genome [genome ID]            A genome reference given in the config file humanref.config
                                       Currently defaults to only available option hg19
       --adapter [adapter file]        A FASTA file for the adapter sequences to be trimmed
-      --trim                          Trim the sequence data before continuing with alignment
+      --trim                          Trim the sequence data before continuing with alignment (default false)
+      --frombam                       Start from bam files in input folder instead of fastq.gz and go back and align it again (default false)
 
     Other options:
       --outdir [file]                 The output directory where the results will be saved
@@ -82,12 +83,15 @@ ch_output_docs = file("$baseDir/docs/output.md", checkIfExists: true)
  // Use an approach like:
  // ch_nucleotide_db = params.nucletide_db ? Channel.value(file(params.nucletide_db)) : "null";
 
+params.frombam = false
 //input channel of (sampleprefix, forward, reverse)
+if (!params.frombam) {
  Channel
      .fromFilePairs("$params.input/*_{R1,R2}*.fastq.gz")
      .ifEmpty { error "Cannot find any reads matching ${params.input}"}
      .set { readpairs }
 (ch_read_files_fastqc, inputSample, inputAlreadyTrimmed) = readpairs.into(3)
+}
 
 params.genome = "hg19" //this is the default and at the moment the only with all the reference files
 params.adapter = "/usr/share/sequencing/references/adapters/TruSeq-adapters-recommended.fa" //change this based on the adapter to trim
@@ -370,6 +374,9 @@ process fastqc {
     output:
     file "*_fastqc.{zip,html}" into ch_fastqc_results
 
+    when:
+    !params.frombam
+
     script:
     """
     fastqc --quiet --threads $task.cpus $reads
@@ -392,6 +399,9 @@ process multiqc {
     file "*multiqc_report.html" into ch_multiqc_report
     file "*_data"
     file "multiqc_plots"
+
+    when:
+    !params.frombam
 
     script:
     rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
@@ -433,7 +443,7 @@ process docutadapt {
   file("${sampleprefix}.trim.out") into trimouts
 
   when:
-  params.trim
+  params.trim && !params.frombam
 
   script:
   """
@@ -453,7 +463,7 @@ process dotrimlog {
   file("trimming-summary.csv") into trimlogend
 
   when:
-  params.trim
+  params.trim && !params.frombam
 
   script:
   """
@@ -461,7 +471,7 @@ process dotrimlog {
   """
 }
 
-if (!params.trim) {
+if ((!params.trim) && (!params.frombam)) {
   trimmingoutput1 = inputAlreadyTrimmed.map {mixup -> tuple(mixup[0], mixup[1][0], mixup[1][1])}
 }
 
@@ -477,14 +487,45 @@ process doalignment {
   output:
   set (sampleprefix, file("${sampleprefix}_sorted.bam") ) into sortedbam
 
+  when:
+  !params.frombam
+
   script:
   """
   bwa mem \
   -t ${task.cpus} \
   -R '@RG\\tID:${sampleprefix}\\tSM:${sampleprefix}\\tPL:Illumina' \
-  $fastaref \
-  ${forwardtrimmed} ${reversetrimmed} \
+  $fastaref ${forwardtrimmed} ${reversetrimmed} \
   | samtools sort -@ ${task.cpus} \
+  -o ${sampleprefix}_sorted.bam -O BAM
+  """
+}
+
+if (params.frombam) {
+  baminput = Channel.fromPath("$params.input/*.bam").ifEmpty{error "Cannot find any BAM files in directory ${params.input}"}
+}
+
+process AlignBamFile {
+  label 'process_high'
+
+  input:
+  file(baminfile) from baminput
+  file( fastaref ) from ch_genomefasta
+  file ( bwaindex ) from ch_bwaIndex
+
+  output:
+  set (sampleprefix, file("${sampleprefix}_sorted.bam") ) into sortedbam
+
+  when:
+  params.frombam
+
+  script:
+  sampleprefix = (baminfile.name).replace(".bam","")
+  """
+  samtools bam2fq -T RX ${baminfile} | \
+  bwa mem -p -t ${task.cpus} -C -M -R '@RG\\tID:${sampleprefix}\\tSM:${sampleprefix}\\tPL:Illumina' \
+  $fastaref - | \
+  samtools sort -@ ${task.cpus} \
   -o ${sampleprefix}_sorted.bam -O BAM
   """
 }
