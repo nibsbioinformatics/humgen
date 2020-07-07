@@ -536,7 +536,8 @@ process AlignBamFile {
 sortedfordups = Channel.empty()
 if (params.frombam) {
   sortedfordups = sortedfordups.mix(sortedbamfrombam)
-} if (!params.frombam) {
+}
+if (!params.frombam) {
   sortedfordups = sortedfordups.mix(sortedbam)
 }
 
