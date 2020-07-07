@@ -85,6 +85,7 @@ ch_output_docs = file("$baseDir/docs/output.md", checkIfExists: true)
 
 params.frombam = false
 //input channel of (sampleprefix, forward, reverse)
+(ch_read_files_fastqc, inputSample, inputAlreadyTrimmed) = Channel.empty().into(3)
 if (!params.frombam) {
  Channel
      .fromFilePairs("$params.input/*_{R1,R2}*.fastq.gz")
