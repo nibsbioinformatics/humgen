@@ -517,7 +517,7 @@ process AlignBamFile {
   file ( bwaindex ) from ch_bwaIndex
 
   output:
-  set (sampleprefix, file("${sampleprefix}_sorted.bam") ) into sortedbam
+  set (sampleprefix, file("${sampleprefix}_sorted.bam") ) into sortedbamfrombam
 
   when:
   params.frombam
@@ -533,13 +533,20 @@ process AlignBamFile {
   """
 }
 
+sortedfordups = Channel.empty()
+if (params.frombam) {
+  sortedfordups = sortedfordups.mix(sortedbamfrombam)
+} if (!params.frombam) {
+  sortedfordups = sortedfordups.mix(sortedbam)
+}
+
 //NIBSC 3 - mark duplicates
 process markduplicates {
     tag "$name"
     label 'process_medium'
 
   input:
-  set ( sampleprefix, file(sortedbamfile) ) from sortedbam
+  set ( sampleprefix, file(sortedbamfile) ) from sortedfordups
 
   output:
   set ( sampleprefix, file("${sampleprefix}.marked.bam") ) into (markedbamfortable, markedbamforapply)
