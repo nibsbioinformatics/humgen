@@ -733,8 +733,9 @@ process hardfilter {
 
 //NIBSC 12 - merging the snps and indels again
 process remergevars {
-    tag "$name"
-    label 'process_medium'
+  publishDir "$params.outdir/analysis", mode: "copy"
+  tag "$name"
+  label 'process_medium'
 
   input:
   set ( sampleprefix, file(germlinesnp), file(germlineindel), file(somaticsnp), file(somaticindel) ) from filteredvars
@@ -751,8 +752,8 @@ process remergevars {
 //NIBSC 13 - evaluating the variant calls for ti-tv ratio and so-on
 process variantevaluation {
   publishDir "$params.outdir/analysis", mode: "copy"
-    tag "$name"
-    label 'process_medium'
+  tag "$name"
+  label 'process_medium'
 
   input:
   set ( sampleprefix, file(germline), file(germlineindex), file(somatic), file(somaticindex) ) from germsomvars1
@@ -772,22 +773,22 @@ process variantevaluation {
 }
 
 //NIBSC 14 - adding annotation to variant calls for effect prediction - uses snpEff installed settings for hg19
-process effectprediction {
-  publishDir "$params.outdir/analysis", mode: "copy"
-    tag "$name"
-    label 'process_medium'
-
-  input:
-  set ( sampleprefix, file(germline), file(germlineindex), file(somatic), file(somaticindex) ) from germsomvars2
-
-  output:
-  set ( sampleprefix, file("${sampleprefix}.germline.annotated.vcf"), file("${sampleprefix}.somatic.annotated.vcf") ) into annotatedvars
-
-  """
-  snpEff -Xmx8g hg19 $germline > ${sampleprefix}.germline.annotated.vcf
-  snpEff -Xmx8g hg19 $somatic > ${sampleprefix}.somatic.annotated.vcf
-  """
-}
+//process effectprediction {
+//  publishDir "$params.outdir/analysis", mode: "copy"
+    //tag "$name"
+    //label 'process_medium'
+//
+//  input:
+//  set ( sampleprefix, file(germline), file(germlineindex), file(somatic), file(somaticindex) ) from germsomvars2
+//
+//  output:
+//  set ( sampleprefix, file("${sampleprefix}.germline.annotated.vcf"), file("${sampleprefix}.somatic.annotated.vcf") ) into annotatedvars
+//
+//  """
+//  snpEff -Xmx8g hg19 $germline > ${sampleprefix}.germline.annotated.vcf
+//  snpEff -Xmx8g hg19 $somatic > ${sampleprefix}.somatic.annotated.vcf
+//  """
+//}
 
 
 
