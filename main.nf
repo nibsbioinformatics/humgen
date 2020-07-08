@@ -760,6 +760,7 @@ process variantevaluation {
   file(dbsnpIndex) from dbsnpIndexBuilt
   file(fasta) from ch_genomefasta
   file(fastaFai) from fastaFaiBuilt
+  file(fastadict) from dictBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.germline.eval.grp"), file("${sampleprefix}.somatic.eval.grp") ) into variantevaluations
