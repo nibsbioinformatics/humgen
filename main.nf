@@ -718,6 +718,7 @@ process hardfilter {
   set ( sampleprefix, file(hapsnp), file(hapindel), file(mutsnp), file(mutindel) ) from splitupvars
   file(fasta) from ch_genomefasta
   file(fastafai) from fastaFaiBuilt
+  file(fastadict) from dictBuilt
 
   output:
   set ( sampleprefix, file("${sampleprefix}.germline.filtered.snp.vcf"), file("${sampleprefix}.germline.filtered.indel.vcf"), file("${sampleprefix}.somatic.filtered.snp.vcf"), file("${sampleprefix}.somatic.filtered.indel.vcf") ) into filteredvars
